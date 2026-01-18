@@ -1,6 +1,6 @@
 /**
  * AI Tracer - Connects to Cloudflare AI Worker for intelligent edge detection
- * Falls back to client-side Canny edge detection if worker unavailable
+ * With skeletonization for clean single-line output suitable for CNC cutting
  */
 
 export class AITracer {
@@ -54,7 +54,6 @@ export class AITracer {
         const result = await response.json();
 
         if (result.edgeImage) {
-            // Worker returned a processed edge image, trace it client-side
             const edgeImg = new Image();
             await new Promise(resolve => {
                 edgeImg.onload = resolve;
@@ -67,15 +66,14 @@ export class AITracer {
     }
 
     /**
-     * Client-side edge detection and path extraction
-     * Uses Canny-style edge detection
+     * Client-side edge detection with skeletonization for clean single lines
      */
     clientSideTrace(image) {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
 
         // Scale down for processing if too large
-        const maxSize = 800;
+        const maxSize = 1000;
         let width = image.width;
         let height = image.height;
 
@@ -104,18 +102,24 @@ export class AITracer {
         // Sobel edge detection
         const edges = this.sobelEdge(blurred, width, height);
 
-        // Threshold edges
-        const threshold = 50;
-        const binary = edges.map(v => v > threshold ? 255 : 0);
+        // Threshold to binary
+        const threshold = 40;
+        let binary = new Uint8Array(width * height);
+        for (let i = 0; i < edges.length; i++) {
+            binary[i] = edges[i] > threshold ? 1 : 0;
+        }
 
-        // Extract contours using marching squares
-        const paths = this.extractContours(binary, width, height);
+        // === KEY FIX: Skeletonize to get single-pixel centerlines ===
+        binary = this.skeletonize(binary, width, height);
+
+        // Extract paths from skeleton
+        const paths = this.extractSkeletonPaths(binary, width, height);
 
         // Simplify and convert to SVG path strings
         return paths.map(points => this.pointsToPath(points));
     }
 
-    gaussianBlur(data, width, height, radius = 1) {
+    gaussianBlur(data, width, height) {
         const kernel = [
             [1, 2, 1],
             [2, 4, 2],
@@ -173,18 +177,160 @@ export class AITracer {
         return result;
     }
 
-    extractContours(binary, width, height) {
+    /**
+     * Zhang-Suen thinning algorithm for skeletonization
+     * Reduces binary edges to single-pixel wide centerlines
+     */
+    skeletonize(binary, width, height) {
+        const img = new Uint8Array(binary);
+        let changed = true;
+        let iterations = 0;
+        const maxIterations = 100;
+
+        while (changed && iterations < maxIterations) {
+            changed = false;
+            iterations++;
+
+            // Pass 1
+            const toRemove1 = [];
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const idx = y * width + x;
+                    if (img[idx] === 1 && this.zhangSuenPass1(img, x, y, width)) {
+                        toRemove1.push(idx);
+                    }
+                }
+            }
+            for (const idx of toRemove1) {
+                img[idx] = 0;
+                changed = true;
+            }
+
+            // Pass 2
+            const toRemove2 = [];
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const idx = y * width + x;
+                    if (img[idx] === 1 && this.zhangSuenPass2(img, x, y, width)) {
+                        toRemove2.push(idx);
+                    }
+                }
+            }
+            for (const idx of toRemove2) {
+                img[idx] = 0;
+                changed = true;
+            }
+        }
+
+        console.log(`Skeletonization completed in ${iterations} iterations`);
+        return img;
+    }
+
+    /**
+     * Get 8-connected neighbors (P2-P9 in Zhang-Suen notation)
+     */
+    getNeighbors(img, x, y, width) {
+        return [
+            img[(y - 1) * width + x],     // P2 (north)
+            img[(y - 1) * width + x + 1], // P3 (northeast)
+            img[y * width + x + 1],       // P4 (east)
+            img[(y + 1) * width + x + 1], // P5 (southeast)
+            img[(y + 1) * width + x],     // P6 (south)
+            img[(y + 1) * width + x - 1], // P7 (southwest)
+            img[y * width + x - 1],       // P8 (west)
+            img[(y - 1) * width + x - 1]  // P9 (northwest)
+        ];
+    }
+
+    /**
+     * Count 0-to-1 transitions in clockwise order
+     */
+    countTransitions(neighbors) {
+        let count = 0;
+        for (let i = 0; i < 8; i++) {
+            if (neighbors[i] === 0 && neighbors[(i + 1) % 8] === 1) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Count non-zero neighbors
+     */
+    countNeighbors(neighbors) {
+        return neighbors.reduce((sum, v) => sum + v, 0);
+    }
+
+    zhangSuenPass1(img, x, y, width) {
+        const n = this.getNeighbors(img, x, y, width);
+        const B = this.countNeighbors(n);
+        const A = this.countTransitions(n);
+
+        // Conditions for Pass 1
+        return (
+            B >= 2 && B <= 6 &&
+            A === 1 &&
+            (n[0] * n[2] * n[4]) === 0 && // P2 * P4 * P6 = 0
+            (n[2] * n[4] * n[6]) === 0    // P4 * P6 * P8 = 0
+        );
+    }
+
+    zhangSuenPass2(img, x, y, width) {
+        const n = this.getNeighbors(img, x, y, width);
+        const B = this.countNeighbors(n);
+        const A = this.countTransitions(n);
+
+        // Conditions for Pass 2
+        return (
+            B >= 2 && B <= 6 &&
+            A === 1 &&
+            (n[0] * n[2] * n[6]) === 0 && // P2 * P4 * P8 = 0
+            (n[0] * n[4] * n[6]) === 0    // P2 * P6 * P8 = 0
+        );
+    }
+
+    /**
+     * Extract paths from skeletonized image
+     * Follows connected single-pixel lines
+     */
+    extractSkeletonPaths(skeleton, width, height) {
         const visited = new Set();
         const paths = [];
 
-        // Find edge pixels and trace contours
+        // Find all endpoints and junction points first
+        const endpoints = [];
+
         for (let y = 1; y < height - 1; y++) {
             for (let x = 1; x < width - 1; x++) {
                 const idx = y * width + x;
+                if (skeleton[idx] === 1) {
+                    const neighborCount = this.count8Neighbors(skeleton, x, y, width);
+                    if (neighborCount === 1) {
+                        endpoints.push({ x, y });
+                    }
+                }
+            }
+        }
 
-                if (binary[idx] === 255 && !visited.has(idx)) {
-                    const path = this.traceContour(binary, width, height, x, y, visited);
-                    if (path.length > 10) { // Minimum path length
+        // Start tracing from endpoints for cleaner paths
+        for (const start of endpoints) {
+            const idx = start.y * width + start.x;
+            if (!visited.has(idx)) {
+                const path = this.tracePath(skeleton, width, height, start.x, start.y, visited);
+                if (path.length >= 5) { // Minimum path length
+                    paths.push(path);
+                }
+            }
+        }
+
+        // Then trace remaining connected components (closed loops)
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const idx = y * width + x;
+                if (skeleton[idx] === 1 && !visited.has(idx)) {
+                    const path = this.tracePath(skeleton, width, height, x, y, visited);
+                    if (path.length >= 5) {
                         paths.push(path);
                     }
                 }
@@ -194,41 +340,43 @@ export class AITracer {
         return paths;
     }
 
-    traceContour(binary, width, height, startX, startY, visited) {
+    count8Neighbors(img, x, y, width) {
+        const neighbors = this.getNeighbors(img, x, y, width);
+        return neighbors.reduce((sum, v) => sum + v, 0);
+    }
+
+    tracePath(skeleton, width, height, startX, startY, visited) {
         const path = [];
         const directions = [
-            [1, 0], [1, 1], [0, 1], [-1, 1],
-            [-1, 0], [-1, -1], [0, -1], [1, -1]
+            [0, -1], [1, -1], [1, 0], [1, 1],
+            [0, 1], [-1, 1], [-1, 0], [-1, -1]
         ];
 
         let x = startX;
         let y = startY;
-        let dir = 0;
-        let maxLength = 5000;
+        let maxLength = 10000;
 
         while (maxLength-- > 0) {
             const idx = y * width + x;
 
             if (visited.has(idx)) {
-                if (path.length > 0) break;
+                break;
             }
 
             visited.add(idx);
             path.push({ x, y });
 
-            // Find next edge pixel
+            // Find unvisited neighbor
             let found = false;
-            for (let i = 0; i < 8; i++) {
-                const checkDir = (dir + i) % 8;
-                const nx = x + directions[checkDir][0];
-                const ny = y + directions[checkDir][1];
+            for (const [dx, dy] of directions) {
+                const nx = x + dx;
+                const ny = y + dy;
 
                 if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
                     const nidx = ny * width + nx;
-                    if (binary[nidx] === 255 && !visited.has(nidx)) {
+                    if (skeleton[nidx] === 1 && !visited.has(nidx)) {
                         x = nx;
                         y = ny;
-                        dir = (checkDir + 5) % 8; // Prefer continuing in same direction
                         found = true;
                         break;
                     }
@@ -238,7 +386,7 @@ export class AITracer {
             if (!found) break;
         }
 
-        return this.simplifyPath(path);
+        return this.simplifyPath(path, 1.5);
     }
 
     simplifyPath(points, tolerance = 2) {
