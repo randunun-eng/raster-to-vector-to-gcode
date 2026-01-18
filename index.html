@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Void-Satellite | AI CNC Plotter Tool</title>
+  <meta name="description" content="AI-powered raster to G-code converter for CNC pen plotters. Perfect for RC plane foam cutting templates.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/index.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo">
+        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 2a10 10 0 0 1 0 20"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+        <span class="logo-text">Void-Satellite</span>
+        <span class="logo-badge">CNC Plotter</span>
+      </div>
+      <div class="header-actions">
+        <button id="settingsBtn" class="btn btn-icon" title="Machine Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 1v4m0 14v4M4.22 4.22l2.83 2.83m9.9 9.9l2.83 2.83M1 12h4m14 0h4M4.22 19.78l2.83-2.83m9.9-9.9l2.83-2.83"/>
+          </svg>
+        </button>
+        <button id="themeToggle" class="btn btn-icon" title="Toggle Theme">
+          <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42m12.72-12.72l1.42-1.42"/>
+          </svg>
+          <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Left Panel: Original Image -->
+      <section class="panel panel-image">
+        <div class="panel-header">
+          <h2>Original Image</h2>
+          <div class="panel-controls">
+            <label class="opacity-control">
+              <span>Opacity</span>
+              <input type="range" id="imageOpacity" min="0" max="100" value="50">
+            </label>
+          </div>
+        </div>
+        <div class="panel-content">
+          <div id="uploadArea" class="upload-area">
+            <div class="upload-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <p class="upload-text">Drop image here or click to upload</p>
+            <p class="upload-hint">PNG, JPG, SVG • RC plane templates</p>
+            <input type="file" id="fileInput" accept="image/*" hidden>
+          </div>
+          <div id="imagePreview" class="image-preview hidden">
+            <img id="originalImage" alt="Original">
+          </div>
+        </div>
+        <div class="panel-footer">
+          <button id="traceBtn" class="btn btn-primary" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+            </svg>
+            AI Trace
+          </button>
+          <button id="clearBtn" class="btn btn-secondary" disabled>Clear</button>
+        </div>
+      </section>
+
+      <!-- Center Panel: Vector Editor -->
+      <section class="panel panel-editor">
+        <div class="panel-header">
+          <h2>Vector Editor</h2>
+          <div class="toolbar">
+            <button class="tool-btn active" data-tool="select" title="Select (V)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+              </svg>
+            </button>
+            <button class="tool-btn" data-tool="pen" title="Pen Tool (P)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+                <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+              </svg>
+            </button>
+            <button class="tool-btn" data-tool="line" title="Line Tool (L)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="5" y1="19" x2="19" y2="5"/>
+              </svg>
+            </button>
+            <button class="tool-btn" data-tool="eraser" title="Eraser (E)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20 20H7L3 16l9-9 8 8-4 5z"/>
+                <path d="M6 11l8 8"/>
+              </svg>
+            </button>
+            <div class="toolbar-divider"></div>
+            <button class="tool-btn" id="undoBtn" title="Undo (Ctrl+Z)" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 7v6h6"/>
+                <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+              </svg>
+            </button>
+            <button class="tool-btn" id="redoBtn" title="Redo (Ctrl+Y)" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 7v6h-6"/>
+                <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"/>
+              </svg>
+            </button>
+            <button class="tool-btn" id="deleteBtn" title="Delete Selected (Del)" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="panel-content editor-container">
+          <div class="canvas-wrapper">
+            <canvas id="editorCanvas"></canvas>
+          </div>
+        </div>
+        <div class="panel-footer">
+          <span id="cursorPosition" class="status-text">X: 0mm Y: 0mm</span>
+          <span id="pathCount" class="status-text">0 paths</span>
+        </div>
+      </section>
+
+      <!-- Right Panel: G-code Terminal -->
+      <section class="panel panel-gcode">
+        <div class="panel-header">
+          <h2>G-code Terminal</h2>
+          <div class="panel-controls">
+            <button id="regenerateBtn" class="btn btn-small btn-secondary" title="Regenerate G-code">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+              </svg>
+              Regenerate
+            </button>
+          </div>
+        </div>
+        <div class="panel-content">
+          <div id="gcodeEditor" class="gcode-editor"></div>
+        </div>
+        <div class="panel-footer">
+          <button id="copyGcode" class="btn btn-secondary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+            Copy
+          </button>
+          <button id="downloadGcode" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download .gcode
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Toolpath Preview Panel -->
+    <section class="preview-panel">
+      <div class="panel-header">
+        <h2>Toolpath Preview</h2>
+        <div class="preview-info">
+          <span id="bedSize">914mm × 610mm</span>
+          <span class="divider">|</span>
+          <span id="estimatedTime">Est: 0m 0s</span>
+        </div>
+        <div class="panel-controls">
+          <button id="playSimulation" class="btn btn-small btn-accent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            Simulate
+          </button>
+          <label class="checkbox-label">
+            <input type="checkbox" id="showGrid" checked>
+            Grid
+          </label>
+        </div>
+      </div>
+      <div class="preview-content">
+        <canvas id="previewCanvas"></canvas>
+        <div class="ruler ruler-x" id="rulerX"></div>
+        <div class="ruler ruler-y" id="rulerY"></div>
+      </div>
+    </section>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Machine Settings</h3>
+          <button class="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="settings-group">
+            <h4>Work Area</h4>
+            <div class="setting-row">
+              <label>Width (mm)</label>
+              <input type="number" id="bedWidth" value="914" min="1">
+            </div>
+            <div class="setting-row">
+              <label>Height (mm)</label>
+              <input type="number" id="bedHeight" value="610" min="1">
+            </div>
+          </div>
+          <div class="settings-group">
+            <h4>Feed Rates</h4>
+            <div class="setting-row">
+              <label>Draw Speed (mm/min)</label>
+              <input type="number" id="feedRate" value="3000" min="100" max="6000">
+            </div>
+            <div class="setting-row">
+              <label>Travel Speed (mm/min)</label>
+              <input type="number" id="travelRate" value="6000" min="100" max="6000">
+            </div>
+          </div>
+          <div class="settings-group">
+            <h4>Pen Control (GRBL)</h4>
+            <div class="setting-row">
+              <label>Pen Up Command</label>
+              <input type="text" id="penUpCmd" value="G0 Z5">
+            </div>
+            <div class="setting-row">
+              <label>Pen Down Command</label>
+              <input type="text" id="penDownCmd" value="G1 Z0">
+            </div>
+          </div>
+          <div class="settings-group">
+            <h4>AI Worker</h4>
+            <div class="setting-row">
+              <label>Worker URL</label>
+              <input type="text" id="workerUrl" value="" placeholder="https://your-worker.workers.dev">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="saveSettings" class="btn btn-primary">Save Settings</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
