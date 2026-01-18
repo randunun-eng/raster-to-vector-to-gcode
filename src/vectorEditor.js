@@ -8,6 +8,7 @@ export class VectorEditor {
         this.canvasEl = document.getElementById(canvasId);
         this.onPathsChange = options.onPathsChange || (() => { });
         this.onCursorMove = options.onCursorMove || (() => { });
+        this.onZoomChange = options.onZoomChange || (() => { });
         this.settings = options.settings;
 
         this.canvas = null;
@@ -20,6 +21,13 @@ export class VectorEditor {
         this.history = [];
         this.historyIndex = -1;
         this.maxHistory = 50;
+
+        // Zoom and pan state
+        this.zoomLevel = 1;
+        this.minZoom = 0.1;
+        this.maxZoom = 10;
+        this.isPanning = false;
+        this.lastPanPoint = null;
 
         this.init();
     }
@@ -504,5 +512,255 @@ export class VectorEditor {
         });
 
         this.canvas.renderAll();
+    }
+
+    // ============================================
+    // Zoom Methods
+    // ============================================
+
+    zoomIn() {
+        this.setZoom(this.zoomLevel * 1.2);
+    }
+
+    zoomOut() {
+        this.setZoom(this.zoomLevel / 1.2);
+    }
+
+    setZoom(level, point = null) {
+        const newZoom = Math.max(this.minZoom, Math.min(this.maxZoom, level));
+
+        if (point) {
+            // Zoom to point
+            this.canvas.zoomToPoint(point, newZoom);
+        } else {
+            // Zoom to center
+            const center = {
+                x: this.canvasWidth / 2,
+                y: this.canvasHeight / 2
+            };
+            this.canvas.zoomToPoint(center, newZoom);
+        }
+
+        this.zoomLevel = newZoom;
+        this.onZoomChange(Math.round(newZoom * 100));
+        this.canvas.renderAll();
+    }
+
+    zoomReset() {
+        // Reset zoom and pan
+        this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        this.zoomLevel = 1;
+        this.onZoomChange(100);
+        this.canvas.renderAll();
+    }
+
+    zoomFit() {
+        // Fit all objects in view
+        const objects = this.canvas.getObjects().filter(obj => !obj.isBackground);
+
+        if (objects.length === 0 && this.backgroundImage) {
+            // Fit to background image
+            const img = this.backgroundImage;
+            const imgWidth = img.width * img.scaleX;
+            const imgHeight = img.height * img.scaleY;
+
+            const scaleX = (this.canvasWidth * 0.9) / imgWidth;
+            const scaleY = (this.canvasHeight * 0.9) / imgHeight;
+            const scale = Math.min(scaleX, scaleY);
+
+            this.setZoom(scale);
+
+            // Center the image
+            const vpt = this.canvas.viewportTransform;
+            vpt[4] = (this.canvasWidth - imgWidth * scale) / 2 - img.left * scale;
+            vpt[5] = (this.canvasHeight - imgHeight * scale) / 2 - img.top * scale;
+            this.canvas.setViewportTransform(vpt);
+        } else if (objects.length > 0) {
+            // Fit to all objects
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+            objects.forEach(obj => {
+                const bounds = obj.getBoundingRect();
+                minX = Math.min(minX, bounds.left);
+                minY = Math.min(minY, bounds.top);
+                maxX = Math.max(maxX, bounds.left + bounds.width);
+                maxY = Math.max(maxY, bounds.top + bounds.height);
+            });
+
+            const contentWidth = maxX - minX;
+            const contentHeight = maxY - minY;
+
+            const scaleX = (this.canvasWidth * 0.9) / contentWidth;
+            const scaleY = (this.canvasHeight * 0.9) / contentHeight;
+            const scale = Math.min(scaleX, scaleY, this.maxZoom);
+
+            this.zoomReset();
+            this.setZoom(scale);
+
+            // Center content
+            const vpt = this.canvas.viewportTransform;
+            const centerX = (minX + maxX) / 2;
+            const centerY = (minY + maxY) / 2;
+            vpt[4] = this.canvasWidth / 2 - centerX * scale;
+            vpt[5] = this.canvasHeight / 2 - centerY * scale;
+            this.canvas.setViewportTransform(vpt);
+        }
+
+        this.canvas.renderAll();
+    }
+
+    getZoomLevel() {
+        return Math.round(this.zoomLevel * 100);
+    }
+
+    // ============================================
+    // Pan Methods
+    // ============================================
+
+    startPan(e) {
+        if (this.currentTool !== 'pan') return;
+
+        this.isPanning = true;
+        this.lastPanPoint = { x: e.clientX, y: e.clientY };
+        this.canvas.selection = false;
+        this.canvas.defaultCursor = 'grabbing';
+        document.getElementById('canvasWrapper')?.classList.add('panning');
+    }
+
+    doPan(e) {
+        if (!this.isPanning || !this.lastPanPoint) return;
+
+        const dx = e.clientX - this.lastPanPoint.x;
+        const dy = e.clientY - this.lastPanPoint.y;
+
+        const vpt = this.canvas.viewportTransform;
+        vpt[4] += dx;
+        vpt[5] += dy;
+        this.canvas.setViewportTransform(vpt);
+
+        this.lastPanPoint = { x: e.clientX, y: e.clientY };
+        this.canvas.renderAll();
+    }
+
+    endPan() {
+        this.isPanning = false;
+        this.lastPanPoint = null;
+        this.canvas.defaultCursor = 'grab';
+        document.getElementById('canvasWrapper')?.classList.remove('panning');
+    }
+
+    // Navigate to anchor position (for anchor buttons)
+    navigateToAnchor(anchor) {
+        // Get content bounds
+        let contentWidth, contentHeight, contentLeft, contentTop;
+
+        if (this.backgroundImage) {
+            const img = this.backgroundImage;
+            contentWidth = img.width * img.scaleX;
+            contentHeight = img.height * img.scaleY;
+            contentLeft = img.left;
+            contentTop = img.top;
+        } else {
+            // Use canvas bounds
+            contentWidth = this.canvasWidth;
+            contentHeight = this.canvasHeight;
+            contentLeft = 0;
+            contentTop = 0;
+        }
+
+        const vpt = this.canvas.viewportTransform;
+        const zoom = this.zoomLevel;
+
+        // Calculate target viewport position based on anchor
+        let targetX, targetY;
+
+        switch (anchor) {
+            case 'tl': // Top Left
+                targetX = -contentLeft * zoom + 50;
+                targetY = -contentTop * zoom + 50;
+                break;
+            case 'tc': // Top Center
+                targetX = this.canvasWidth / 2 - (contentLeft + contentWidth / 2) * zoom;
+                targetY = -contentTop * zoom + 50;
+                break;
+            case 'tr': // Top Right
+                targetX = this.canvasWidth - (contentLeft + contentWidth) * zoom - 50;
+                targetY = -contentTop * zoom + 50;
+                break;
+            case 'ml': // Middle Left
+                targetX = -contentLeft * zoom + 50;
+                targetY = this.canvasHeight / 2 - (contentTop + contentHeight / 2) * zoom;
+                break;
+            case 'mc': // Middle Center
+                targetX = this.canvasWidth / 2 - (contentLeft + contentWidth / 2) * zoom;
+                targetY = this.canvasHeight / 2 - (contentTop + contentHeight / 2) * zoom;
+                break;
+            case 'mr': // Middle Right
+                targetX = this.canvasWidth - (contentLeft + contentWidth) * zoom - 50;
+                targetY = this.canvasHeight / 2 - (contentTop + contentHeight / 2) * zoom;
+                break;
+            case 'bl': // Bottom Left
+                targetX = -contentLeft * zoom + 50;
+                targetY = this.canvasHeight - (contentTop + contentHeight) * zoom - 50;
+                break;
+            case 'bc': // Bottom Center
+                targetX = this.canvasWidth / 2 - (contentLeft + contentWidth / 2) * zoom;
+                targetY = this.canvasHeight - (contentTop + contentHeight) * zoom - 50;
+                break;
+            case 'br': // Bottom Right
+                targetX = this.canvasWidth - (contentLeft + contentWidth) * zoom - 50;
+                targetY = this.canvasHeight - (contentTop + contentHeight) * zoom - 50;
+                break;
+            default:
+                return;
+        }
+
+        // Animate viewport movement
+        this.animateViewportTo(targetX, targetY);
+    }
+
+    animateViewportTo(targetX, targetY) {
+        const vpt = this.canvas.viewportTransform;
+        const startX = vpt[4];
+        const startY = vpt[5];
+        const duration = 300;
+        const startTime = performance.now();
+
+        const animate = (currentTime) => {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // Easing function (ease-out)
+            const eased = 1 - Math.pow(1 - progress, 3);
+
+            vpt[4] = startX + (targetX - startX) * eased;
+            vpt[5] = startY + (targetY - startY) * eased;
+            this.canvas.setViewportTransform(vpt);
+            this.canvas.renderAll();
+
+            if (progress < 1) {
+                requestAnimationFrame(animate);
+            }
+        };
+
+        requestAnimationFrame(animate);
+    }
+
+    // Handle mouse wheel zoom
+    setupWheelZoom() {
+        this.canvas.on('mouse:wheel', (opt) => {
+            const delta = opt.e.deltaY;
+            let zoom = this.canvas.getZoom();
+            zoom *= 0.999 ** delta;
+
+            zoom = Math.max(this.minZoom, Math.min(this.maxZoom, zoom));
+
+            this.canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
+            this.zoomLevel = zoom;
+            this.onZoomChange(Math.round(zoom * 100));
+
+            opt.e.preventDefault();
+            opt.e.stopPropagation();
+        });
     }
 }

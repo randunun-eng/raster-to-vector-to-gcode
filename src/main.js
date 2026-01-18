@@ -30,6 +30,7 @@ class VoidSatellite {
         this.vectorEditor = new VectorEditor('editorCanvas', {
             onPathsChange: (paths) => this.onPathsChange(paths),
             onCursorMove: (x, y) => this.updateCursorPosition(x, y),
+            onZoomChange: (zoom) => this.updateZoomDisplay(zoom),
             settings: this.settings
         });
 
@@ -127,6 +128,72 @@ class VoidSatellite {
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+
+        // ============================================
+        // Zoom Controls
+        // ============================================
+        document.getElementById('zoomInBtn')?.addEventListener('click', () => this.vectorEditor.zoomIn());
+        document.getElementById('zoomOutBtn')?.addEventListener('click', () => this.vectorEditor.zoomOut());
+        document.getElementById('zoomFitBtn')?.addEventListener('click', () => this.vectorEditor.zoomFit());
+        document.getElementById('zoomResetBtn')?.addEventListener('click', () => this.vectorEditor.zoomReset());
+
+        // ============================================
+        // Fullscreen Controls
+        // ============================================
+        document.getElementById('fullscreenBtn')?.addEventListener('click', () => this.toggleFullscreen());
+
+        // ESC key to exit fullscreen
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const panel = document.getElementById('editorPanel');
+                if (panel?.classList.contains('fullscreen')) {
+                    panel.classList.remove('fullscreen');
+                    this.vectorEditor.handleResize();
+                }
+            }
+        });
+
+        // ============================================
+        // Pan Tool - Canvas mouse events
+        // ============================================
+        const canvasWrapper = document.getElementById('canvasWrapper');
+        if (canvasWrapper) {
+            canvasWrapper.addEventListener('mousedown', (e) => {
+                if (this.vectorEditor.currentTool === 'pan') {
+                    this.vectorEditor.startPan(e);
+                }
+            });
+            canvasWrapper.addEventListener('mousemove', (e) => {
+                if (this.vectorEditor.isPanning) {
+                    this.vectorEditor.doPan(e);
+                }
+            });
+            canvasWrapper.addEventListener('mouseup', () => {
+                this.vectorEditor.endPan();
+            });
+            canvasWrapper.addEventListener('mouseleave', () => {
+                this.vectorEditor.endPan();
+            });
+        }
+
+        // ============================================
+        // Navigation Anchors
+        // ============================================
+        document.querySelectorAll('.anchor-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const anchor = btn.dataset.anchor;
+                this.vectorEditor.navigateToAnchor(anchor);
+            });
+        });
+
+        // ============================================
+        // Wheel Zoom (after canvas is ready)
+        // ============================================
+        setTimeout(() => {
+            if (this.vectorEditor.setupWheelZoom) {
+                this.vectorEditor.setupWheelZoom();
+            }
+        }, 500);
     }
 
     loadImage(file) {
@@ -339,10 +406,14 @@ M2 ; end program
     }
 
     handleKeyboard(e) {
+        // Skip if typing in input field
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
         // Tool shortcuts
         if (!e.ctrlKey && !e.metaKey) {
             switch (e.key.toLowerCase()) {
                 case 'v': this.selectTool('select'); break;
+                case 'h': this.selectTool('pan'); break; // H for hand/pan
                 case 'p': this.selectTool('pen'); break;
                 case 'l': this.selectTool('line'); break;
                 case 'e': this.selectTool('eraser'); break;
@@ -350,7 +421,28 @@ M2 ; end program
                 case 'backspace':
                     this.vectorEditor.deleteSelected();
                     break;
+                // Zoom shortcuts
+                case '+':
+                case '=':
+                    this.vectorEditor.zoomIn();
+                    break;
+                case '-':
+                    this.vectorEditor.zoomOut();
+                    break;
+                case 'f':
+                    this.vectorEditor.zoomFit();
+                    break;
+                case '0':
+                    this.vectorEditor.zoomReset();
+                    break;
             }
+        }
+
+        // Space + drag for temporary pan
+        if (e.key === ' ' && !e.repeat) {
+            e.preventDefault();
+            this.previousTool = this.vectorEditor.currentTool;
+            this.selectTool('pan');
         }
 
         // Undo/Redo
@@ -373,8 +465,76 @@ M2 ; end program
             btn.classList.toggle('active', btn.dataset.tool === tool);
         });
         this.vectorEditor.setTool(tool);
+
+        // Update cursor for pan tool
+        const wrapper = document.getElementById('canvasWrapper');
+        if (tool === 'pan') {
+            wrapper?.classList.add('panning');
+        } else {
+            wrapper?.classList.remove('panning');
+        }
+    }
+
+    // ============================================
+    // Zoom and Fullscreen Methods
+    // ============================================
+
+    updateZoomDisplay(zoomPercent) {
+        const zoomLevel = document.getElementById('zoomLevel');
+        const zoomInfo = document.getElementById('zoomInfo');
+
+        if (zoomLevel) zoomLevel.textContent = `${zoomPercent}%`;
+        if (zoomInfo) zoomInfo.textContent = `Zoom: ${zoomPercent}%`;
+    }
+
+    toggleFullscreen() {
+        const panel = document.getElementById('editorPanel');
+        if (!panel) return;
+
+        panel.classList.toggle('fullscreen');
+
+        // Resize canvas after animation
+        setTimeout(() => {
+            this.vectorEditor.handleResize();
+        }, 50);
+
+        // Update button icon
+        const btn = document.getElementById('fullscreenBtn');
+        if (btn) {
+            if (panel.classList.contains('fullscreen')) {
+                btn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="4 14 10 14 10 20"/>
+                        <polyline points="20 10 14 10 14 4"/>
+                        <line x1="14" y1="10" x2="21" y2="3"/>
+                        <line x1="3" y1="21" x2="10" y2="14"/>
+                    </svg>
+                `;
+                btn.title = 'Exit Fullscreen (ESC)';
+            } else {
+                btn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15 3 21 3 21 9"/>
+                        <polyline points="9 21 3 21 3 15"/>
+                        <line x1="21" y1="3" x2="14" y2="10"/>
+                        <line x1="3" y1="21" x2="10" y2="14"/>
+                    </svg>
+                `;
+                btn.title = 'Fullscreen Editor (F11)';
+            }
+        }
     }
 }
 
-// Initialize app
-const app = new VoidSatellite();
+// Initialize app when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    const app = new VoidSatellite();
+
+    // Handle space key release to restore previous tool
+    document.addEventListener('keyup', (e) => {
+        if (e.key === ' ' && app.previousTool) {
+            app.selectTool(app.previousTool);
+            app.previousTool = null;
+        }
+    });
+});
